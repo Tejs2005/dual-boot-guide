@@ -170,7 +170,88 @@ one-liner to reboot straight into Windows).
 `grub2-editenv list` (shows the saved default) and `/boot/loader/entries/*.conf`
 (needs root).
 
-## 8. Recovery playbook (only use in an emergency)
+## 8. Boot visuals — what you see between power-on and desktop
+
+> **Replicating this setup on another laptop?** Follow the step-by-step,
+> AI-executable runbook: [SETUP-ON-ANOTHER-LAPTOP.md](SETUP-ON-ANOTHER-LAPTOP.md)
+
+The boot chain has four visual stages. What each one shows on this machine
+(verified 2026-11-13):
+
+| Stage | What it is | What you see here | Config |
+|---|---|---|---|
+| 1. Firmware splash | Laptop vendor logo | Vendor logo — not user-changeable | in UEFI firmware |
+| 2. **GRUB menu** | OS picker (6 s) | Fedora's default look — no custom theme verified (`/boot/grub2/` is root-only; see below) | `/boot/grub2/grub.cfg`, `/boot/grub2/themes/` |
+| 3. **Boot splash (Plymouth)** | Fills screen while Linux loads | **Plain text mode** — no graphical animation. Theme is `text`; available alternatives: `charge`, `details`, `spinner`, `tribar` | `plymouth-set-default-theme` |
+| 4. **Login screen (SDDM)** | Where you type your password | **Animated video background**: `snowfall-in-forest.1920x1080.mp4` from the `aerial-cinematic-qt6` theme | `/etc/sddm.conf.d/kde_settings.conf` |
+
+### The GIF question, answered
+
+- The active SDDM theme is **`aerial-cinematic-qt6`** (video background, not GIF).
+  SDDM drop-in configs (`/etc/sddm.conf.d/`) **override** `/etc/sddm.conf` — and
+  `/etc/sddm.conf` still says `Current=sddm-astronaut-theme`, which is why it can
+  look contradictory. The drop-in wins.
+- The animated GIF lives in the *inactive* theme:
+  `~/sddm-astronaut-theme/Backgrounds/pixel_sakura.gif` (820 KB, plus static PNG
+  fallback and two video options: `hyprland_kath.mp4`, `jake_the_dog.mp4`).
+- To switch the login screen to that GIF theme, change
+  `/etc/sddm.conf.d/kde_settings.conf` → `Current=sddm-astronaut-theme`.
+
+### The full boot-visual stack (deep dive)
+
+**Active login theme — Aerial Cinematic Qt6** (video background):
+
+- Source: https://github.com/RussH/Aerial-Cinematic-Qt6 (GPL, by RussH), Qt6,
+  installed at `/usr/share/sddm/themes/aerial-cinematic-qt6/` (verified present).
+- Background = `snowfall-in-forest.1920x1080.mp4`. `Main.qml` line 51 is the
+  theme's **only** background source (`config.backgroundVideo`) — the
+  `type=image` line in the system copy's `theme.conf.user` is ignored dead
+  config (Main.qml never reads a `type` key).
+- Runtime deps (verified on this machine): `qt6-qtsvg-6.11.2`,
+  `qt6-qtvirtualkeyboard-6.11.2`, `qt6-qtmultimedia-6.11.2`, SDDM with
+  `InputMethod=qtvirtualkeyboard` (`/etc/sddm.conf.d/virtualkbd.conf`).
+- Font: `Droid Sans Mono for Powerline`, clock 84 pt, accent `#00d2ff`,
+  error `#ff4b2b` (from `theme.conf`).
+
+**Inactive GIF theme — sddm-astronaut-theme** (Keyitdev, v1.4, Qt6,
+GPL-3.0+, https://github.com/Keyitdev/sddm-astronaut-theme):
+
+- Installed at `/usr/share/sddm/themes/sddm-astronaut-theme/` (verified present).
+- Ten variants, one config each under `Themes/`. The animated-GIF variant is
+  `pixel_sakura.conf` → `Background="Backgrounds/pixel_sakura.gif"`
+  (verified verbatim). The rest of the Backgrounds folder: `black_hole`,
+  `cyberpunk`, `hyprland_kath` (.mp4), `jake_the_dog` (.mp4), `japanese_aesthetic`,
+  `pixel_sakura` (.gif), `post-apocalyptic_hacker`, `purple_leaves` — all PNG
+  except the two MP4s and the GIF.
+- `/etc/sddm.conf` still points at this theme (`Current=sddm-astronaut-theme`)
+  — a leftover. The drop-in `kde_settings.conf` overrides it.
+
+**Why the login screen looks the way it does** (the two-config rule):
+
+```
+/etc/sddm.conf               Current=sddm-astronaut-theme   ← stale, ignored
+/etc/sddm.conf.d/kde_settings.conf   Current=aerial-cinematic-qt6   ← WINS
+/etc/sddm.conf.d/virtualkbd.conf     InputMethod=qtvirtualkeyboard
+```
+
+### Changing the boot visuals
+
+```bash
+# Boot splash → graphical spinner instead of text
+sudo plymouth-set-default-theme spinner && sudo dracut -f
+
+# Login screen background → any file in the theme's folder, set in its theme.conf
+# (aerial-cinematic-qt6: ~/Aerial-Cinematic-Qt6/theme.conf backgroundVideo=...)
+
+# GRUB menu background → needs root; put a theme in /boot/grub2/themes/ and
+# add GRUB_THEME= to /etc/default/grub, then grub2-mkconfig (see §7)
+```
+
+⚠️ Login-screen theming runs as root at boot — a broken SDDM theme can leave
+you staring at a black screen. Test themes before committing; keep a TTY
+fallback (`Ctrl+Alt+F3`) in mind.
+
+## 9. Recovery playbook (only use in an emergency)
 
 **Linux won't boot (GRUB broken):**
 1. Boot a Fedora Live USB on this machine.
@@ -188,7 +269,7 @@ one-liner to reboot straight into Windows).
 normally leaves the other bootable. Always make the *installed* OS's bootloader
 the one you repair, not the one you're reinstalling.
 
-## 9. Hard-won rules from this machine's history
+## 10. Hard-won rules from this machine's history
 
 1. **Never `sed` into `/etc/pam.d/system-auth`** — it's managed by `authselect`
    and must stay a symlink. A one-character typo there on 2026-10-14 locked out
@@ -201,9 +282,11 @@ the one you repair, not the one you're reinstalling.
    denied" listing it. That's correct behavior, not breakage.
 5. **After kernel updates, give `akmods` time** before assuming the GPU is broken (§3).
 
-## 10. Known unknowns
+## 11. Known unknowns
 
 - Exact Windows version/build — not verified this session (§4 has the how-to).
+- GRUB menu background/theme — `/boot/grub2/` is root-only from the agent, so
+  unverified. Check with: `sudo ls /boot/grub2/themes/ && grep GRUB_THEME /boot/grub2/grub.cfg`.
 - Whether the Windows recovery partition (p4) still works — only testable from
   Windows.
 - Firmware/BIOS model settings (passwords, boot lockdown) — not inspectable
@@ -231,6 +314,11 @@ the one you repair, not the one you're reinstalling.
 | udisksctl workflow + Windows-side paths | brain note `ai-brains/zcode/memory/windows-vrtx-brain-access.md` | 2026-11-13 (paths), 2026-10-10 (origin) |
 | Fast Startup resolved | brain note `location/windows-storage.md` §WRITE SAFETY | 2026-10-10 |
 | PAM faillock incident | brain note `to-do/2026-10-14-hardening-the-laptop.md` + `repair/still-need-fixing/2026-10-20-pam-faillock-typo-locks-out-sudo.md` | 2026-10-20 |
+| Login manager is SDDM | `systemctl status display-manager.service` | 2026-11-13 |
+| Active SDDM theme = aerial-cinematic-qt6 (drop-in wins over sddm.conf) | `/etc/sddm.conf.d/kde_settings.conf` vs `/etc/sddm.conf` | 2026-11-13 |
+| Login background = snowfall-in-forest video | `~/Aerial-Cinematic-Qt6/theme.conf` (`backgroundVideo=`) | 2026-11-13 |
+| Plymouth theme = text (no graphical splash) | `plymouth-set-default-theme`; `/usr/share/plymouth/themes/` | 2026-11-13 |
+| pixel_sakura.gif lives in the inactive astronaut theme | `ls ~/sddm-astronaut-theme/Backgrounds/` | 2026-11-13 |
 | windows-storage script + autostart | `ls -la ~/bin/windows-storage ~/.config/autostart/windows-storage.desktop` | 2026-11-13 |
 
 *Maintained by the brain (ZCode). Regenerate with: mount nothing, run the receipt commands, diff against this file.*
